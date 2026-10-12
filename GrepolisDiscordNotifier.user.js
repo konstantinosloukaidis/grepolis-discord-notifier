@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Grepolis Discord Attack Notifier
-// @version      1.3
+// @version      1.4
 // @author       AbstractGR
 // @description  Standalone script to send Discord alerts for incoming Grepolis attacks
 // @match        http://*.grepolis.com/game/*
@@ -47,57 +47,174 @@
     }
 
     const I18N = {
-    en: {
-        flag: "🇬🇧",
-        ping: "Under Attack!",
-        title: "INCOMING ATTACK DETECTED",
-        description: "An enemy movement has been spotted heading towards your city!",
-        originCity: "🗡️ Origin City",
-        targetCity: "🛡️ Target City",
-        targetPlayer: "👤 Target Player",
-        arrivalTime: "⏳ Arrival Time (DE Time)",
-        cityStatus: "🏛️ City Status",
-        senate: "Senate Level",
-        wall: "Wall Level",
-        god: "Active God",
-        protection: "City Protection",
-        protectionActive: "ACTIVE",
-        protectionInactive: "INACTIVE",
-        silver: "Cave Silver",
-        nativeTroops: "🗡️ Native Troops (Owned)",
-        supportTroops: "🛡️ Supporting Troops (Stationed)",
-        noTroops: "_No troops inside_",
-        none: "None",
-        unknown: "Unknown",
-        footer: "Grepolis Sentry System",
-        impact: "on impact"
-    },
-    el: {
-        flag: "🇬🇷",
-        ping: "Δεχόμαστε επίθεση!",
-        title: "ΕΝΤΟΠΙΣΤΗΚΕ ΕΙΣΕΡΧΟΜΕΝΗ ΕΠΙΘΕΣΗ",
-        description: "Εχθρικά στρατεύματα κατευθύνονται προς την πόλη σου!",
-        originCity: "🗡️ Πόλη Προέλευσης",
-        targetCity: "🛡️ Πόλη Στόχος",
-        targetPlayer: "👤 Παίκτης Στόχος",
-        arrivalTime: "⏳ Ώρα Άφιξης (Ώρα Γερμανίας)",
-        cityStatus: "🏛️ Κατάσταση Πόλης",
-        senate: "Επίπεδο Συγκλήτου",
-        wall: "Επίπεδο Τείχους",
-        god: "Λατρευόμενος Θεός",
-        protection: "Προστασία Πόλης",
-        protectionActive: "ΕΝΕΡΓΗ",
-        protectionInactive: "ΑΝΕΝΕΡΓΗ",
-        silver: "Ασήμι",
-        nativeTroops: "🗡️ Δικά σου Στρατεύματα",
-        supportTroops: "🛡️ Ξένες Υποστηρίξεις (Σταθμευμένες)",
-        noTroops: "_Δεν υπάρχουν στρατεύματα_",
-        none: "Κανένας",
-        unknown: "Άγνωστο",
-        footer: "Σύστημα Ειδοποιήσεων Grepolis",
-        impact: "κατά την πρόσκρουση"
+        en: {
+            flag: "🇬🇧",
+            ping: "Under Attack!",
+            title: "INCOMING ATTACK DETECTED",
+            description: "An enemy movement has been spotted heading towards your city!",
+            originCity: "🗡️ Origin City",
+            targetCity: "🛡️ Target City",
+            targetPlayer: "👤 Target Player",
+            arrivalTime: "⏳ Arrival Time (DE Time)",
+            cityStatus: "🏛️ City Status",
+            senate: "Senate Level",
+            wall: "Wall Level",
+            god: "Active God",
+            protection: "City Protection",
+            protectionActive: "ACTIVE",
+            protectionInactive: "INACTIVE",
+            silver: "Cave Silver",
+            nativeTroops: "🗡️ Native Troops (Owned)",
+            supportTroops: "🛡️ Supporting Troops (Stationed)",
+            noTroops: "_No troops inside_",
+            none: "None",
+            unknown: "Unknown",
+            footer: "Grepolis Sentry System",
+            impact: "on impact",
+
+            // Regular Units
+            sword: "swordsmen",
+            slinger: "slingers",
+            archer: "archers",
+            hoplite: "hoplites",
+            rider: "riders",
+            chariot: "chariots",
+            catapult: "catapults",
+            militia: "militia",
+
+            // Naval Units
+            big_transporter: "slow transport ships",
+            small_transporter: "fast transport ships",
+            bireme: "biremes",
+            attack_ship: "light ships",
+            demolition_ship: "fire ships",
+            trireme: "triremes",
+            colonize_ship: "colony ships",
+
+            // Mythical & Divine Units
+            minotaur: "minotaurs",
+            manticore: "manticores",
+            zyklop: "cyclopes",
+            harpy: "harpies",
+            medusa: "medusas",
+            centaur: "centaurs",
+            pegasus: "pegasi",
+            cerberus: "cerberuses",
+            fury: "furies",
+            griffin: "griffins",
+            calydonian_boar: "calydonian boars",
+            satyr: "satyrs",
+            spartoi: "spartoi",
+            siren: "sirens",
+            sea_monster: "hydras",
+            ladon: "ladons",
+            godsent: "divine envoys",
+
+            // Gods
+            zeus: "Zeus",
+            poseidon: "Poseidon",
+            hera: "Hera",
+            athena: "Athena",
+            hades: "Hades",
+            artemis: "Artemis",
+            aphrodite: "Aphrodite",
+            ares: "Ares",
+
+            // Research, Buildings & Advisors
+            phalanx: "Phalanx",
+            ram: "Ram",
+            tower: "Tower",
+            lighthouse: "Lighthouse",
+            captain: "Captain",
+            commander: "Commander",
+            yes: "Yes",
+            no: "No"
+        },
+        el: {
+            flag: "🇬🇷",
+            ping: "Δεχόμαστε επίθεση!",
+            title: "ΕΝΤΟΠΙΣΤΗΚΕ ΕΙΣΕΡΧΟΜΕΝΗ ΕΠΙΘΕΣΗ",
+            description: "Εχθρικά στρατεύματα κατευθύνονται προς την πόλη σου!",
+            originCity: "🗡️ Πόλη Προέλευσης",
+            targetCity: "🛡️ Πόλη Στόχος",
+            targetPlayer: "👤 Παίκτης Στόχος",
+            arrivalTime: "⏳ Ώρα Άφιξης (Ώρα Γερμανίας)",
+            cityStatus: "🏛️ Κατάσταση Πόλης",
+            senate: "Επίπεδο Συγκλήτου",
+            wall: "Επίπεδο Τείχους",
+            god: "Λατρευόμενος Θεός",
+            protection: "Προστασία Πόλης",
+            protectionActive: "ΕΝΕΡΓΗ",
+            protectionInactive: "ΑΝΕΝΕΡΓΗ",
+            silver: "Ασήμι",
+            nativeTroops: "🗡️ Δικά σου Στρατεύματα",
+            supportTroops: "🛡️ Ξένες Υποστηρίξεις (Σταθμευμένες)",
+            noTroops: "_Δεν υπάρχουν στρατεύματα_",
+            none: "Κανένας",
+            unknown: "Άγνωστο",
+            footer: "Σύστημα Ειδοποιήσεων Grepolis",
+            impact: "κατά την πρόσκρουση",
+
+            // Regular Units
+            sword: "ξιφομάχοι",
+            slinger: "σφενδονήτες",
+            archer: "τοξότες",
+            hoplite: "οπλίτες",
+            rider: "ιππείς",
+            chariot: "άρματα",
+            catapult: "καταπέλτες",
+            militia: "εθνοφρουρά",
+
+            // Naval Units
+            big_transporter: "αργά μεταφορικά",
+            small_transporter: "γρήγορα μεταφορικά",
+            bireme: "διήρεις",
+            attack_ship: "φάροι",
+            "attack ship": "φάροι",
+            demolition_ship: "πυρπολικά",
+            trireme: "τριήρεις",
+            colonize_ship: "αποικιακά",
+
+            // Mythical & Divine Units
+            minotaur: "μινώταυροι",
+            manticore: "μαντιχώρες",
+            zyklop: "κύκλωπες",
+            harpy: "άρπυιες",
+            medusa: "μέδουσες",
+            centaur: "κένταυροι",
+            pegasus: "πήγασοι",
+            cerberus: "κέρβεροι",
+            fury: "ερινύες",
+            griffin: "γρύπες",
+            calydonian_boar: "καλυδώνιοι κάπροι",
+            satyr: "σάτυροι",
+            spartoi: "σπαρτοί",
+            siren: "σειρήνες",
+            sea_monster: "ύδρες",
+            ladon: "λάδωνες",
+            godsent: "θεϊκοί απεσταλμένοι",
+
+            // Gods
+            zeus: "Δίας",
+            poseidon: "Ποσειδώνας",
+            hera: "Ήρα",
+            athena: "Αθηνά",
+            hades: "Άδης",
+            artemis: "Άρτεμις",
+            aphrodite: "Αφροδίτη",
+            ares: "Άρης",
+
+            // Research, Buildings & Advisors
+            phalanx: "Φάλαγγα",
+            ram: "Κριός",
+            tower: "Πύργος",
+            lighthouse: "Φάρος",
+            captain: "Καπετάνιος",
+            commander: "Στρατηγός",
+            yes: "Ναι",
+            no: "Όχι"
+        }
     }
-};
     // ==========================================
 
     const uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -208,6 +325,8 @@
             const town = uw.ITowns.getTown(targetTownId);
 
             if (town) {
+                const models = uw.MM.getModels();
+
                 // 1. Wall Calculation & Projection
                 const buildings = town.buildings?.()?.attributes || {};
                 const currentWall = buildings.wall ?? 0;
@@ -230,7 +349,7 @@
 
                 // 2. God, Protection & Silver
                 const rawGod = typeof town.god === "function" ? town.god() : null;
-                const godDisplay = rawGod ? (rawGod.charAt(0).toUpperCase() + rawGod.slice(1)) : t.none;
+                const godDisplay = rawGod ? t[rawGod] : t.none;
 
                 let isProtected = false;
                 if (typeof town.getCastedPowers === "function") {
@@ -246,10 +365,27 @@
                     ? Number(town.getEspionageStorage())
                     : "0";
 
+                // 3. Researches
+                const researches = models?.Researches?.attributes || {};
+                const hasRam = researches.ram ?? false;
+                const hasPhalanx = researches.phalanx ?? false;
+                
+                // 4. Premium
+                const premium = models?.PremiumFeatures[uw.Game.player_id]?.attributes || {};
+                const hasCaptain = (premium?.captain || 0) > movement.arrival_at ?? false;
+                const hasCommander = (premium?.commander || 0) > movement.arrival_at ?? false;
+
+                // 5. Tower or lighthouse
+                const hasTower = buildings.tower > 0 ?? false;
+                const hasLighthouse = buildings.lighthouse > 0 ?? false;
+
                 // Format City Status with every attribute on its own clean line
                 const statusLines = [
                     `🏛️ **${t.senate}:** \`${senateLevel}\``,
                     `🧱 **${t.wall}:**${wallDisplay}`,
+                    `🏰 **${t.tower}:** ${hasTower ? t.yes : t.no} / **${t.lighthouse}:** ${hasLighthouse ? t.yes : t.no}`,
+                    `🛡️ **${t.phalanx}:** ${hasPhalanx ? t.yes : t.no} / **${t.ram}:** ${hasRam ? t.yes : t.no}`,
+                    `🪙 **${t.captain}:** ${hasCaptain ? t.yes : t.no} / **${t.commander}:** ${hasCommander ? t.yes : t.no}`,
                     `⚡ **${t.god}:** \`${godDisplay}\``,
                     `🛡️ **${t.protection}:** ${isProtected ? `\`${t.protectionActive}\`` : `\`${t.protectionInactive}\``}`,
                     `🪙 **${t.silver}:** \`${silverStored}\``
@@ -261,7 +397,7 @@
                     if (entries.length === 0) return t.noTroops;
 
                     return entries
-                        .map(([unit, count]) => `• \`${String(count).padStart(4, " ")}\`  ${unit.replace(/_/g, " ")}`)
+                        .map(([unit, count]) => `• \`${String(count).padStart(5, " ")}\`  ${t[unit]}`)
                         .join("\n");
                 };
 
