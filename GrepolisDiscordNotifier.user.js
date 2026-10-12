@@ -1,0 +1,432 @@
+// ==UserScript==
+// @name         Grepolis Discord Attack Notifier
+// @version      1.3
+// @author       AbstractGR
+// @description  Standalone script to send Discord alerts for incoming Grepolis attacks
+// @match        http://*.grepolis.com/game/*
+// @match        https://*.grepolis.com/game/*
+// @updateURL    https://raw.githubusercontent.com/konstantinosloukaidis/grepolis-discord-notifier/main/GrepolisDiscordNotifier.user.js
+// @downloadURL  https://raw.githubusercontent.com/konstantinosloukaidis/grepolis-discord-notifier/main/GrepolisDiscordNotifier.user.js
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
+// @connect      discord.com
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Helper functions for storage (DIO-Tools pattern)
+    function loadVal(key, def) {
+        let v = typeof GM_getValue === 'function' ? GM_getValue(key) : localStorage.getItem(key);
+        if (v === null || v === undefined) return def;
+        try { return JSON.parse(v); } catch(e) { return v; }
+    }
+    function saveVal(key, val) {
+        let serialized = JSON.stringify(val);
+        if (typeof GM_setValue === 'function') GM_setValue(key, serialized);
+        else localStorage.setItem(key, serialized);
+    }
+
+    // ==========================================
+    // CONFIGURATION (Storage-backed with defaults)
+    // ==========================================
+    const PROD_WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1558509905793654966/kwunVuU8LeyjlxruqE3jUEdEsaC0kljM7f_vREKIEDCwqcx4fgz6ck2udANd2x9FhNv3";
+    const DEV_WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1559104745531252746/TVa2F8xJQlnXiPBdc0GofYGVtJ48Vn6l32a6YPMNlJjKpzGRih-9NZs9xX4ItrgR73w6";
+
+    let PING_EVERYONE = loadVal("sentry_ping", false); // Set to true to include @here in the alert
+    let IS_DEV = loadVal("sentry_is_dev", true);
+    let DETAILED = loadVal("sentry_detailed", true); // Set to true to include city status and troop details in the alert
+    let LANG = loadVal("sentry_lang", "el"); // Options: "en" (English), "el" (Greek)
+    let PROD_WEBHOOK = loadVal("sentry_prod_wh", PROD_WEBHOOK_DEFAULT);
+    let DEV_WEBHOOK = loadVal("sentry_dev_wh", DEV_WEBHOOK_DEFAULT);
+
+    function getWebhookUrl() {
+        return IS_DEV ? DEV_WEBHOOK : PROD_WEBHOOK;
+    }
+
+    const I18N = {
+    en: {
+        flag: "🇬🇧",
+        ping: "Under Attack!",
+        title: "INCOMING ATTACK DETECTED",
+        description: "An enemy movement has been spotted heading towards your city!",
+        originCity: "🗡️ Origin City",
+        targetCity: "🛡️ Target City",
+        targetPlayer: "👤 Target Player",
+        arrivalTime: "⏳ Arrival Time (DE Time)",
+        cityStatus: "🏛️ City Status",
+        senate: "Senate Level",
+        wall: "Wall Level",
+        god: "Active God",
+        protection: "City Protection",
+        protectionActive: "ACTIVE",
+        protectionInactive: "INACTIVE",
+        silver: "Cave Silver",
+        nativeTroops: "🗡️ Native Troops (Owned)",
+        supportTroops: "🛡️ Supporting Troops (Stationed)",
+        noTroops: "_No troops inside_",
+        none: "None",
+        unknown: "Unknown",
+        footer: "Grepolis Sentry System",
+        impact: "on impact"
+    },
+    el: {
+        flag: "🇬🇷",
+        ping: "Δεχόμαστε επίθεση!",
+        title: "ΕΝΤΟΠΙΣΤΗΚΕ ΕΙΣΕΡΧΟΜΕΝΗ ΕΠΙΘΕΣΗ",
+        description: "Εχθρικά στρατεύματα κατευθύνονται προς την πόλη σου!",
+        originCity: "🗡️ Πόλη Προέλευσης",
+        targetCity: "🛡️ Πόλη Στόχος",
+        targetPlayer: "👤 Παίκτης Στόχος",
+        arrivalTime: "⏳ Ώρα Άφιξης (Ώρα Γερμανίας)",
+        cityStatus: "🏛️ Κατάσταση Πόλης",
+        senate: "Επίπεδο Συγκλήτου",
+        wall: "Επίπεδο Τείχους",
+        god: "Λατρευόμενος Θεός",
+        protection: "Προστασία Πόλης",
+        protectionActive: "ΕΝΕΡΓΗ",
+        protectionInactive: "ΑΝΕΝΕΡΓΗ",
+        silver: "Ασήμι",
+        nativeTroops: "🗡️ Δικά σου Στρατεύματα",
+        supportTroops: "🛡️ Ξένες Υποστηρίξεις (Σταθμευμένες)",
+        noTroops: "_Δεν υπάρχουν στρατεύματα_",
+        none: "Κανένας",
+        unknown: "Άγνωστο",
+        footer: "Σύστημα Ειδοποιήσεων Grepolis",
+        impact: "κατά την πρόσκρουση"
+    }
+};
+    // ==========================================
+
+    const uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    const knownAttacks = new Set();
+
+    // Utility for cross-manager HTTP requests
+    const request = typeof GM_xmlhttpRequest !== "undefined" ? GM_xmlhttpRequest : GM.xmlHttpRequest;
+
+    function initNotifier() {
+        if (!uw.MM || !uw.GameEvents) {
+            setTimeout(initNotifier, 1000);
+            return;
+        }
+
+        console.log("Grepolis Discord Notifier: Initialized and listening for attacks.");
+
+        // Listen to native game events for real-time notification
+        uw.$.Observer(uw.GameEvents.attack.incoming).subscribe(() => {
+            checkAttacks();
+        });
+
+        // Fallback polling just in case the UI event is missed
+        setInterval(checkAttacks, IS_DEV ? 10000 : 120000); // Check every 10s in dev, every 120s in production
+
+        // Observer for Settings window opening (/player/index) - DIO-Tools style
+        uw.$(document).ajaxComplete(function (e, xhr, opt) {
+            let url = (opt && opt.url) ? opt.url.split("?")[0] : "";
+            if (url.includes("/player") || url.includes("/player/index")) {
+                setTimeout(injectSettings, 200);
+            }
+        });
+    }
+
+    function checkAttacks() {
+        // console.log("Grepolis Discord Notifier: Checking for incoming attacks...");
+        const models = uw.MM.getModels();
+        if (!models || !models.MovementsUnits) return;
+
+        const movements = models.MovementsUnits;
+        const currentAttackIds = new Set();
+
+
+        for (const key in movements) {
+            const movement = movements[key].attributes;
+
+            if (isIncoming(movement) && (movement.type === 'attack' || movement.command_type === 'Attack')) {
+                currentAttackIds.add(movement.id);
+
+                if (!knownAttacks.has(movement.id)) {
+                    knownAttacks.add(movement.id);
+                    const payload = preparePayloadOneAttack(movement);
+                    sendDiscordAlert(payload);
+                }
+            }
+        }
+
+        // Cleanup stale attacks that have landed/been cancelled to prevent memory leaks
+        for (const id of knownAttacks) {
+            if (!currentAttackIds.has(id)) {
+                knownAttacks.delete(id);
+            }
+        }
+    }
+
+    function isIncoming(movement) {
+        return IS_DEV || (movement.started_at === null && movement.home_town_id !== null);
+    }
+
+    function preparePayloadOneAttack(movement) {
+        const t = I18N[LANG] || I18N.en;
+
+        const arrivalDate = new Date(movement.arrival_at * 1000);
+        const arrivalTime = arrivalDate.toLocaleString("de-DE", { 
+            timeZone: "Europe/Berlin",
+            hour12: false
+        });
+
+        const player = uw.Game.player_name || t.unknown;
+        const worldId = uw.Game.world_id || "zz34";
+
+        const fields = [
+            { 
+                name: t.originCity, 
+                value: movement.home_town_id 
+                    ? `[**${movement.town_name_origin || t.unknown}**](https://grepodata.com/intel/town/${worldId}/${movement.home_town_id})` 
+                    : `**${movement.town_name_origin || t.unknown}**`, 
+                inline: true 
+            },
+            { 
+                name: t.targetCity, 
+                value: `**${movement.town_name_destination || t.unknown}**`, 
+                inline: true 
+            },
+            { 
+                name: t.targetPlayer, 
+                value: `*${player}*`, 
+                inline: true 
+            },
+            { 
+                name: t.arrivalTime, 
+                value: `\`${arrivalTime}\``, 
+                inline: false 
+            }
+        ];
+
+        if (DETAILED) {
+            const targetTownId = movement.target_town_id;
+            const town = uw.ITowns.getTown(targetTownId);
+
+            if (town) {
+                // 1. Wall Calculation & Projection
+                const buildings = town.buildings?.()?.attributes || {};
+                const currentWall = buildings.wall ?? 0;
+                const senateLevel = buildings.main ?? 0;
+
+                let projectedWall = currentWall;
+                const buildingOrdersCollection = typeof town.buildingOrders === "function" ? town.buildingOrders() : town.buildingOrders;
+                const orders = buildingOrdersCollection?.models || [];
+
+                for (const order of orders) {
+                    const attr = order.attributes;
+                    if (attr && attr.building_type === "wall" && attr.to_be_completed_at <= movement.arrival_at) {
+                        projectedWall += attr.tear_down ? -1 : 1;
+                    }
+                }
+
+                const wallDisplay = projectedWall !== currentWall 
+                    ? `\`${currentWall}\` ➔ **\`${projectedWall}\`** *(\`${t.impact}\`)*` 
+                    : `\`${currentWall}\``;
+
+                // 2. God, Protection & Silver
+                const rawGod = typeof town.god === "function" ? town.god() : null;
+                const godDisplay = rawGod ? (rawGod.charAt(0).toUpperCase() + rawGod.slice(1)) : t.none;
+
+                let isProtected = false;
+                if (typeof town.getCastedPowers === "function") {
+                    const casted = town.getCastedPowers();
+                    const powers = Array.isArray(casted) ? casted : (casted?.models || []);
+                    isProtected = powers.some(p => {
+                        const powerId = p.attributes?.power_id || p.power_id;
+                        return powerId === "town_protection";
+                    });
+                }
+
+                const silverStored = typeof town.getEspionageStorage === "function" 
+                    ? Number(town.getEspionageStorage())
+                    : "0";
+
+                // Format City Status with every attribute on its own clean line
+                const statusLines = [
+                    `🏛️ **${t.senate}:** \`${senateLevel}\``,
+                    `🧱 **${t.wall}:**${wallDisplay}`,
+                    `⚡ **${t.god}:** \`${godDisplay}\``,
+                    `🛡️ **${t.protection}:** ${isProtected ? `\`${t.protectionActive}\`` : `\`${t.protectionInactive}\``}`,
+                    `🪙 **${t.silver}:** \`${silverStored}\``
+                ].join("\n");
+
+                // 3. Line-by-Line Detailed Troop Formatter
+                const formatUnitsVertical = (unitsObj) => {
+                    const entries = Object.entries(unitsObj || {}).filter(([_, count]) => count > 0);
+                    if (entries.length === 0) return t.noTroops;
+
+                    return entries
+                        .map(([unit, count]) => `• \`${String(count).padStart(4, " ")}\`  ${unit.replace(/_/g, " ")}`)
+                        .join("\n");
+                };
+
+                const nativeUnits = typeof town.units === "function" ? town.units() : {};
+                const supportUnits = typeof town.unitsSupport === "function" ? town.unitsSupport() : {};
+
+                fields.push(
+                    {
+                        name: t.cityStatus,
+                        value: statusLines,
+                        inline: false
+                    },
+                    {
+                        name: t.nativeTroops,
+                        value: formatUnitsVertical(nativeUnits),
+                        inline: true
+                    },
+                    {
+                        name: t.supportTroops,
+                        value: formatUnitsVertical(supportUnits),
+                        inline: true
+                    }
+                );
+            }
+        }
+
+        return {
+            username: "Grepolis Sentry",
+            content: PING_EVERYONE ? `@here ⚔️ **${t.ping}**` : `⚔️ **${t.ping}**`,
+            embeds: [
+                {
+                    title: `🚨 **${t.title}** 🚨`,
+                    description: t.description,
+                    color: 16711680,
+                    fields: fields,
+                    footer: {
+                        text: `${t.flag} ${t.footer} • World: ${worldId}`
+                    },
+                    timestamp: new Date().toISOString()
+                }
+            ]
+        };
+    }
+
+    function sendDiscordAlert(payload) {
+        const webhookUrl = getWebhookUrl();
+
+        if (!webhookUrl || webhookUrl === "YOUR_WEBHOOK_URL_HERE") {
+            console.warn("Grepolis Discord Notifier: Webhook URL not configured.");
+            return;
+        }
+
+        request({
+            method: "POST",
+            url: webhookUrl,
+            headers: { "Content-Type": "application/json" },
+            data: JSON.stringify(payload),
+            onload: (res) => console.log("Attack alert sent. Discord response:", res.status),
+            onerror: (err) => console.error("Failed to send attack alert.", err)
+        });
+    }
+
+    // =========================================================================
+    // DIO-TOOLS SETTINGS INJECTION LOGIC
+    // =========================================================================
+    function injectSettings() {
+        const $menu = uw.$(".settings-menu ul:last");
+        if (!$menu.length || uw.$("#sentry_settings_link").length) return;
+
+        // 1. Add sidebar entry into settings list (matching DIO-Tools style)[cite: 2]
+        $menu.append(`
+            <li id="sentry_li">
+                <a id="sentry_settings_link" href="javascript:void(0);">
+                    <span class="left"><span class="right"><span class="middle">⚡ Discord Sentry</span></span></span>
+                </a>
+            </li>
+        `);
+
+        // Hide our panel if user clicks back to standard settings tabs
+        uw.$(".settings-link, .settings-menu li:not(#sentry_li) a").on("click", function () {
+            uw.$(".section").show();
+            uw.$("#sentry_settings_container").hide();
+        });
+
+        // 2. Open Sentry settings pane[cite: 2]
+        uw.$("#sentry_settings_link").on("click", function () {
+            uw.$(".settings-container .section").hide();
+            uw.$(".settings-menu li a").removeClass("active");
+            uw.$(this).addClass("active");
+
+            let $panel = uw.$("#sentry_settings_container");
+            if (!$panel.length) {
+                $panel = uw.$(`
+                    <div id="sentry_settings_container" class="player_settings section" style="display:none; padding:15px; overflow-y:auto; max-height:430px;">
+                        <div class="game_header bold">⚡ Discord Sentry Settings</div>
+                        
+                        <div style="margin: 12px 0;">
+                            <label style="font-weight:bold; display:block; margin-bottom:4px;">Mode:</label>
+                            <label><input type="radio" name="sentry_mode" value="prod" ${!IS_DEV ? "checked" : ""}> Production</label>
+                            <label style="margin-left:15px;"><input type="radio" name="sentry_mode" value="dev" ${IS_DEV ? "checked" : ""}> Development (Dev Webhook)</label>
+                        </div>
+
+                        <div style="margin: 12px 0;">
+                            <label style="font-weight:bold; display:block; margin-bottom:4px;">Production Webhook URL:</label>
+                            <input type="text" id="sentry_prod_inp" value="${PROD_WEBHOOK}" style="width:90%; padding:4px;" />
+                        </div>
+
+                        <div style="margin: 12px 0;">
+                            <label style="font-weight:bold; display:block; margin-bottom:4px;">Development Webhook URL:</label>
+                            <input type="text" id="sentry_dev_inp" value="${DEV_WEBHOOK}" style="width:90%; padding:4px;" />
+                        </div>
+
+                        <div style="margin: 12px 0;">
+                            <label style="font-weight:bold; display:block; margin-bottom:4px;">Language:</label>
+                            <select id="sentry_lang_sel" style="padding:3px;">
+                                <option value="el" ${LANG === "el" ? "selected" : ""}>🇬🇷 Ελληνικά (Greek)</option>
+                                <option value="en" ${LANG === "en" ? "selected" : ""}>🇬🇧 English</option>
+                            </select>
+                        </div>
+
+                        <div style="margin: 12px 0;">
+                            <label style="font-weight:bold; display:block; margin-bottom:4px;">Embed Features:</label>
+                            <label><input type="checkbox" id="sentry_det_chk" ${DETAILED ? "checked" : ""}> Detailed (Wall, God, Units)</label><br/>
+                            <label><input type="checkbox" id="sentry_ping_chk" ${PING_EVERYONE ? "checked" : ""}> Ping @here</label>
+                        </div>
+
+                        <div style="margin-top: 15px;">
+                            <div id="sentry_save_btn" class="button_new" style="display:inline-block; cursor:pointer;">
+                                <div class="left"></div><div class="right"></div>
+                                <div class="caption js-caption">Save Sentry Settings<div class="effect js-effect"></div></div>
+                            </div>
+                        </div>
+                    </div>
+                `);
+
+                uw.$(".settings-container").append($panel);
+
+                $panel.find("#sentry_save_btn").on("click", function () {
+                    IS_DEV = $panel.find("input[name='sentry_mode']:checked").val() === "dev";
+                    PROD_WEBHOOK = $panel.find("#sentry_prod_inp").val().trim();
+                    DEV_WEBHOOK = $panel.find("#sentry_dev_inp").val().trim();
+                    LANG = $panel.find("#sentry_lang_sel").val();
+                    DETAILED = $panel.find("#sentry_det_chk").is(":checked");
+                    PING_EVERYONE = $panel.find("#sentry_ping_chk").is(":checked");
+
+                    saveVal("sentry_is_dev", IS_DEV);
+                    saveVal("sentry_prod_wh", PROD_WEBHOOK);
+                    saveVal("sentry_dev_wh", DEV_WEBHOOK);
+                    saveVal("sentry_lang", LANG);
+                    saveVal("sentry_detailed", DETAILED);
+                    saveVal("sentry_ping", PING_EVERYONE);
+
+                    if (uw.HumanMessage) {
+                        uw.HumanMessage.success("Sentry settings saved!");
+                    } else {
+                        alert("Sentry settings saved!");
+                    }
+                });
+            }
+
+            $panel.show();
+        });
+    }
+
+    // Start the script
+    initNotifier();
+
+})();
