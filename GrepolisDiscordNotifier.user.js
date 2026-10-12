@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Grepolis Discord Attack Notifier
-// @version      1.4
+// @version      1.4.2
 // @author       AbstractGR
 // @description  Standalone script to send Discord alerts for incoming Grepolis attacks
 // @match        http://*.grepolis.com/game/*
@@ -157,7 +157,7 @@
 
             // Regular Units
             sword: "ξιφομάχοι",
-            slinger: "σφενδονήτες",
+            slinger: "σφεντόνες",
             archer: "τοξότες",
             hoplite: "οπλίτες",
             rider: "ιππείς",
@@ -170,7 +170,6 @@
             small_transporter: "γρήγορα μεταφορικά",
             bireme: "διήρεις",
             attack_ship: "φάροι",
-            "attack ship": "φάροι",
             demolition_ship: "πυρπολικά",
             trireme: "τριήρεις",
             colonize_ship: "αποικιακά",
