@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Grepolis Discord Attack Notifier
-// @version      1.4.2
+// @version      1.5
 // @author       AbstractGR
 // @description  Standalone script to send Discord alerts for incoming Grepolis attacks
 // @match        http://*.grepolis.com/game/*
@@ -36,11 +36,45 @@
     const DEV_WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1559104745531252746/TVa2F8xJQlnXiPBdc0GofYGVtJ48Vn6l32a6YPMNlJjKpzGRih-9NZs9xX4ItrgR73w6";
 
     let PING_EVERYONE = loadVal("sentry_ping", false); // Set to true to include @here in the alert
-    let IS_DEV = loadVal("sentry_is_dev", true);
+    let IS_DEV = loadVal("sentry_is_dev", false);
     let DETAILED = loadVal("sentry_detailed", true); // Set to true to include city status and troop details in the alert
     let LANG = loadVal("sentry_lang", "el"); // Options: "en" (English), "el" (Greek)
     let PROD_WEBHOOK = loadVal("sentry_prod_wh", PROD_WEBHOOK_DEFAULT);
     let DEV_WEBHOOK = loadVal("sentry_dev_wh", DEV_WEBHOOK_DEFAULT);
+    let IGNORED_ALLIANCES = loadVal("sentry_ignored_alliances", []);
+    console.log(IGNORED_ALLIANCES);
+
+    let ALLIANCE_CACHE = null;
+
+    async function getAlliances() {
+        if (ALLIANCE_CACHE) return ALLIANCE_CACHE;
+
+        try {
+            const res = await fetch(`https://${window.location.hostname}/data/alliances.txt`);
+            const text = await res.text();
+
+            ALLIANCE_CACHE = text
+                .split('\n')
+                .map(line => {
+                    const parts = line.split(',');
+                    if (parts.length < 2 || !parts[1]) return null;
+
+                    const cleanName = decodeURIComponent(parts[1].replace(/\+/g, ' ')).trim();
+                    if (!cleanName) return null;
+
+                    return {
+                        id: Number(parts[0]),
+                        name: cleanName
+                    };
+                })
+                .filter(Boolean);
+
+            return ALLIANCE_CACHE;
+        } catch (err) {
+            console.error("Failed to load alliances:", err);
+            return [];
+        }
+    }
 
     function getWebhookUrl() {
         return IS_DEV ? DEV_WEBHOOK : PROD_WEBHOOK;
@@ -53,6 +87,7 @@
             title: "INCOMING ATTACK DETECTED",
             description: "An enemy movement has been spotted heading towards your city!",
             originCity: "🗡️ Origin City",
+            originPlayer: "👤 Origin Player",
             targetCity: "🛡️ Target City",
             targetPlayer: "👤 Target Player",
             arrivalTime: "⏳ Arrival Time (DE Time)",
@@ -71,6 +106,7 @@
             unknown: "Unknown",
             footer: "Grepolis Sentry System",
             impact: "on impact",
+            alliance: "Alliance",
 
             // Regular Units
             sword: "swordsmen",
@@ -136,6 +172,7 @@
             title: "ΕΝΤΟΠΙΣΤΗΚΕ ΕΙΣΕΡΧΟΜΕΝΗ ΕΠΙΘΕΣΗ",
             description: "Εχθρικά στρατεύματα κατευθύνονται προς την πόλη σου!",
             originCity: "🗡️ Πόλη Προέλευσης",
+            originPlayer: "👤 Παίκτης Προέλευσης",
             targetCity: "🛡️ Πόλη Στόχος",
             targetPlayer: "👤 Παίκτης Στόχος",
             arrivalTime: "⏳ Ώρα Άφιξης (Ώρα Γερμανίας)",
@@ -154,6 +191,7 @@
             unknown: "Άγνωστο",
             footer: "Σύστημα Ειδοποιήσεων Grepolis",
             impact: "κατά την πρόσκρουση",
+            alliance: "Συμμαχία",
 
             // Regular Units
             sword: "ξιφομάχοι",
@@ -217,7 +255,7 @@
     // ==========================================
 
     const uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-    const knownAttacks = new Set();
+    const knownAttacks = new Set(loadVal("sentry_known_attacks", [])); // Set of known attack IDs to prevent duplicate alerts
 
     // Utility for cross-manager HTTP requests
     const request = typeof GM_xmlhttpRequest !== "undefined" ? GM_xmlhttpRequest : GM.xmlHttpRequest;
@@ -232,6 +270,7 @@
 
         // Listen to native game events for real-time notification
         uw.$.Observer(uw.GameEvents.attack.incoming).subscribe(() => {
+            console.log("Grepolis Discord Notifier: Movement observed.");
             checkAttacks();
         });
 
@@ -247,7 +286,7 @@
         });
     }
 
-    function checkAttacks() {
+    async function checkAttacks() {
         // console.log("Grepolis Discord Notifier: Checking for incoming attacks...");
         const models = uw.MM.getModels();
         if (!models || !models.MovementsUnits) return;
@@ -264,25 +303,25 @@
 
                 if (!knownAttacks.has(movement.id)) {
                     knownAttacks.add(movement.id);
-                    const payload = preparePayloadOneAttack(movement);
-                    sendDiscordAlert(payload);
+                    const payload = await preparePayloadOneAttack(movement);
+                    if (payload) sendDiscordAlert(payload);
                 }
             }
         }
 
-        // Cleanup stale attacks that have landed/been cancelled to prevent memory leaks
         for (const id of knownAttacks) {
             if (!currentAttackIds.has(id)) {
                 knownAttacks.delete(id);
             }
         }
+        saveVal("sentry_known_attacks", Array.from(knownAttacks));
     }
 
     function isIncoming(movement) {
         return IS_DEV || (movement.started_at === null && movement.home_town_id !== null);
     }
 
-    function preparePayloadOneAttack(movement) {
+    async function preparePayloadOneAttack(movement) {
         const t = I18N[LANG] || I18N.en;
 
         const arrivalDate = new Date(movement.arrival_at * 1000);
@@ -293,6 +332,11 @@
 
         const player = uw.Game.player_name || t.unknown;
         const worldId = uw.Game.world_id || "zz34";
+        const playerAllianceId = uw.Game.alliance_id || null;
+
+        const oppPlayerInfo = await getPlayerInfoFromPolisId(movement.home_town_id, movement.target_town_id);
+
+        if (filterOutIgnoredAlliances(oppPlayerInfo)) return null;
 
         const fields = [
             { 
@@ -300,6 +344,16 @@
                 value: movement.home_town_id 
                     ? `[**${movement.town_name_origin || t.unknown}**](https://grepodata.com/intel/town/${worldId}/${movement.home_town_id})` 
                     : `**${movement.town_name_origin || t.unknown}**`, 
+                inline: true 
+            },
+            { 
+                name: t.originPlayer, 
+                value: `*${oppPlayerInfo.playerName || t.unknown}*`, 
+                inline: true 
+            },
+            { 
+                name: t.alliance, 
+                value: `*${oppPlayerInfo.allianceName || t.unknown}*`, 
                 inline: true 
             },
             { 
@@ -441,6 +495,46 @@
         };
     }
 
+    function filterOutIgnoredAlliances(oppPlayerInfo) {
+        if (playerAllianceId == oppPlayerInfo.allianceId || IGNORED_ALLIANCES.includes(oppPlayerInfo.allianceName)) {
+            console.log("Grepolis Discord Notifier: Attack ignored due to alliance restrictions.");
+            return true;
+        }
+        return false;
+    }
+
+    async function getPlayerInfoFromPolisId(oppTownId, defPolisId) {
+        return new Promise((resolve, reject) => {
+            const params = {
+                id: defPolisId,
+                town_id: oppTownId,
+                nl_init: true
+            };
+
+            uw.gpAjax.ajaxGet('town_info', 'info', params, false, function (response) {
+                const rawHtml = response?.html || response;
+                const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
+
+                const playerName = doc.querySelector('#info_tab_content')?.dataset.player_name 
+                    || doc.querySelector('.gp_player_link')?.textContent.trim() 
+                    || null;
+
+                const allianceName = doc.querySelector('.gp_alliance_link')?.textContent.trim() 
+                    || null;
+
+                const allianceId = doc.querySelector('#info_tab_content')?.dataset.alliance
+                    || null;
+
+                // This returns the object out to your caller
+                resolve({ playerName, allianceName, allianceId });
+            }, function (error) {
+                reject(error);
+            });
+        });
+    }
+
+    
+
     function sendDiscordAlert(payload) {
         const webhookUrl = getWebhookUrl();
 
@@ -466,7 +560,7 @@
         const $menu = uw.$(".settings-menu ul:last");
         if (!$menu.length || uw.$("#sentry_settings_link").length) return;
 
-        // 1. Add sidebar entry into settings list (matching DIO-Tools style)[cite: 2]
+        // Add sidebar entry into settings list
         $menu.append(`
             <li id="sentry_li">
                 <a id="sentry_settings_link" href="javascript:void(0);">
@@ -475,20 +569,25 @@
             </li>
         `);
 
-        // Hide our panel if user clicks back to standard settings tabs
+        // Hide Sentry panel if user clicks back to standard settings tabs
         uw.$(".settings-link, .settings-menu li:not(#sentry_li) a").on("click", function () {
             uw.$(".section").show();
             uw.$("#sentry_settings_container").hide();
         });
 
-        // 2. Open Sentry settings pane[cite: 2]
-        uw.$("#sentry_settings_link").on("click", function () {
+        // Open Sentry settings pane
+        uw.$("#sentry_settings_link").on("click", async function () {
             uw.$(".settings-container .section").hide();
             uw.$(".settings-menu li a").removeClass("active");
             uw.$(this).addClass("active");
 
+            // Fetch alliances immediately so the list is ready before typing
+            await getAlliances();
+
             let $panel = uw.$("#sentry_settings_container");
             if (!$panel.length) {
+                let tempIgnoredAlliances = Array.isArray(IGNORED_ALLIANCES) ? [...IGNORED_ALLIANCES] : [];
+
                 $panel = uw.$(`
                     <div id="sentry_settings_container" class="player_settings section" style="display:none; padding:15px; overflow-y:auto; max-height:430px;">
                         <div class="game_header bold">⚡ Discord Sentry Settings</div>
@@ -517,6 +616,14 @@
                             </select>
                         </div>
 
+                        <!-- Multi-Select Alliance Filter -->
+                        <div style="margin: 12px 0; position:relative;">
+                            <label style="font-weight:bold; display:block; margin-bottom:4px;">Filtered Alliances (Ignore Attacks):</label>
+                            <div id="sentry_tags_container" style="display:flex; flex-wrap:wrap; gap:4px; padding:4px; border:1px solid #7f5f3f; background:#fff7e2; min-height:28px; border-radius:3px; margin-bottom:4px; align-items:center;"></div>
+                            <input type="text" id="sentry_ally_search" placeholder="Type alliance name..." style="width:90%; padding:4px;" autocomplete="off" />
+                            <ul id="sentry_ally_dropdown" style="display:none; position:absolute; left:0; width:90%; max-height:140px; overflow-y:auto; background:#fffbf0; border:1px solid #7f5f3f; z-index:99999; list-style:none; padding:0; margin:2px 0 0 0; box-shadow:0 3px 6px rgba(0,0,0,0.3);"></ul>
+                        </div>
+
                         <div style="margin: 12px 0;">
                             <label style="font-weight:bold; display:block; margin-bottom:4px;">Embed Features:</label>
                             <label><input type="checkbox" id="sentry_det_chk" ${DETAILED ? "checked" : ""}> Detailed (Wall, God, Units)</label><br/>
@@ -534,6 +641,95 @@
 
                 uw.$(".settings-container").append($panel);
 
+                const $tagBox =$panel.find("#sentry_tags_container");
+                const $searchInp =$panel.find("#sentry_ally_search");
+                const $dropdown =$panel.find("#sentry_ally_dropdown");
+
+                // Renders the selected alliance badges
+                // Helper to safely get the name whether ally is a string or object
+                const getAllyName = (a) => (typeof a === 'object' && a !== null ? a.name : a) || '';
+
+                function renderTags() {
+                    $tagBox.empty();
+                    if (!tempIgnoredAlliances.length) {
+                        $tagBox.html('<span style="color:#888; font-size:11px; padding:2px 4px;">None filtered</span>');
+                        return;
+                    }
+                    tempIgnoredAlliances.forEach((ally, idx) => {
+                        const displayName = getAllyName(ally);
+                        const $tag = uw.$(`
+                            <span style="background:#543d2b; color:#fc6; font-size:11px; font-weight:bold; padding:2px 6px; border-radius:3px; display:inline-flex; align-items:center; gap:4px;">
+                                ${displayName}
+                                <span data-idx="${idx}" style="cursor:pointer; color:#fff; font-weight:bold; margin-left:2px;">&times;</span>
+                            </span>
+                        `);
+                        $tag.find("span").on("click", function () {
+                            const index = uw.$(this).data("idx");
+                            tempIgnoredAlliances.splice(index, 1);
+                            renderTags();
+                        });
+                        $tagBox.append($tag);
+                    });
+                }
+                renderTags();
+
+                // Autocomplete typing logic
+                $searchInp.on("input", function () {
+                    const term = uw.$(this).val().trim().toLowerCase();$dropdown.empty();
+
+                    if (!term) {
+                        $dropdown.hide();
+                        return;
+                    }
+
+                    const pool = ALLIANCE_CACHE || [];
+                    const ignoredNames = tempIgnoredAlliances.map(getAllyName);
+
+                    // FIX 2: Safe string lookup
+                    const matches = pool.filter(ally => {
+                        const name = getAllyName(ally);
+                        return name.toLowerCase().includes(term) && !ignoredNames.includes(name);
+                    });
+
+                    if (!matches.length) {
+                        $dropdown.html('<li style="padding:5px 8px; color:#888; font-size:11px;">No matching alliances</li>').show();
+                        return;
+                    }
+
+                    matches.slice(0, 10).forEach(ally => {
+                        const displayName = getAllyName(ally);
+                        const $item = uw.$(`
+                            <li style="padding:5px 8px; cursor:pointer; font-size:12px; border-bottom:1px solid #ebd7b2; color:#3b2413;">
+                                ${displayName}
+                            </li>
+                        `);
+                        $item.hover(
+                            function () { uw.$(this).css("background", "#fc6"); },
+                            function () { uw.$(this).css("background", "none"); }
+                        );
+                        $item.on("click", function () {
+                            const name = getAllyName(ally);
+                            if (!tempIgnoredAlliances.some(a => getAllyName(a) === name)) {
+                                tempIgnoredAlliances.push(name);
+                                renderTags();
+                            }
+                            $searchInp.val("");
+                            $dropdown.hide();
+                        });
+                        $dropdown.append($item);
+                    });
+
+                    $dropdown.show();
+                });
+
+                // Close dropdown if clicking elsewhere
+                uw.$(document).on("click", function (e) {
+                    if (!uw.$(e.target).closest("#sentry_ally_search, #sentry_ally_dropdown").length) {
+                        $dropdown.hide();
+                    }
+                });
+
+                // Save settings
                 $panel.find("#sentry_save_btn").on("click", function () {
                     IS_DEV = $panel.find("input[name='sentry_mode']:checked").val() === "dev";
                     PROD_WEBHOOK = $panel.find("#sentry_prod_inp").val().trim();
@@ -541,6 +737,7 @@
                     LANG = $panel.find("#sentry_lang_sel").val();
                     DETAILED = $panel.find("#sentry_det_chk").is(":checked");
                     PING_EVERYONE = $panel.find("#sentry_ping_chk").is(":checked");
+                    IGNORED_ALLIANCES = [...tempIgnoredAlliances];
 
                     saveVal("sentry_is_dev", IS_DEV);
                     saveVal("sentry_prod_wh", PROD_WEBHOOK);
@@ -548,6 +745,7 @@
                     saveVal("sentry_lang", LANG);
                     saveVal("sentry_detailed", DETAILED);
                     saveVal("sentry_ping", PING_EVERYONE);
+                    saveVal("sentry_ignored_alliances", IGNORED_ALLIANCES);
 
                     if (uw.HumanMessage) {
                         uw.HumanMessage.success("Sentry settings saved!");
