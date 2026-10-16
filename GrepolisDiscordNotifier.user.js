@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Grepolis Discord Attack Notifier
-// @version      1.5
+// @version      1.5.1
 // @author       AbstractGR
 // @description  Standalone script to send Discord alerts for incoming Grepolis attacks
 // @match        http://*.grepolis.com/game/*
