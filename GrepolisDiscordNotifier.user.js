@@ -332,7 +332,6 @@
 
         const player = uw.Game.player_name || t.unknown;
         const worldId = uw.Game.world_id || "zz34";
-        const playerAllianceId = uw.Game.alliance_id || null;
 
         const oppPlayerInfo = await getPlayerInfoFromPolisId(movement.home_town_id, movement.target_town_id);
 
@@ -496,6 +495,7 @@
     }
 
     function filterOutIgnoredAlliances(oppPlayerInfo) {
+        const playerAllianceId = uw.Game.alliance_id || null;
         if (playerAllianceId == oppPlayerInfo.allianceId || IGNORED_ALLIANCES.includes(oppPlayerInfo.allianceName)) {
             console.log("Grepolis Discord Notifier: Attack ignored due to alliance restrictions.");
             return true;
@@ -506,8 +506,8 @@
     async function getPlayerInfoFromPolisId(oppTownId, defPolisId) {
         return new Promise((resolve, reject) => {
             const params = {
-                id: defPolisId,
-                town_id: oppTownId,
+                id: oppTownId,
+                town_id: defPolisId,
                 nl_init: true
             };
 
