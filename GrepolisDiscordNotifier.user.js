@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Grepolis Discord Attack Notifier
-// @version      1.5.1
+// @version      1.5.2
 // @author       AbstractGR
 // @description  Standalone script to send Discord alerts for incoming Grepolis attacks
 // @match        http://*.grepolis.com/game/*
@@ -454,7 +454,7 @@
                 };
 
                 const nativeUnits = typeof town.units === "function" ? town.units() : {};
-                const supportUnits = typeof town.unitsSupport === "function" ? town.unitsSupport() : {};
+                const { totalUnits } = await getStationedSupportTroops(targetTownId);
 
                 fields.push(
                     {
@@ -469,7 +469,7 @@
                     },
                     {
                         name: t.supportTroops,
-                        value: formatUnitsVertical(supportUnits),
+                        value: formatUnitsVertical(totalUnits),
                         inline: true
                     }
                 );
@@ -533,7 +533,38 @@
         });
     }
 
-    
+    function getStationedSupportTroops(townId) {
+        return new Promise((resolve, reject) => {
+            const payload = {
+                window_type: "building_place",
+                tab_type: "index",
+                known_data: { models: [], collections: [], templates: [] },
+                town_id: townId,
+                nl_init: true
+            };
+
+            uw.gpAjax.ajaxGet("building_place", "index", payload, true, function(res) {
+                try {
+                    const supportArray = res?.data?.support_array || [];
+                    const totalUnits = {};
+
+                    const buckets = Array.isArray(supportArray) ? supportArray : Object.values(supportArray);
+
+                    buckets.forEach(entry => {
+                        const units = entry.units || {};
+
+                        for (const [unit, count] of Object.entries(units)) {
+                            totalUnits[unit] = (totalUnits[unit] || 0) + Number(count);
+                        }
+                    });
+
+                    resolve({ totalUnits });
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        });
+    }
 
     function sendDiscordAlert(payload) {
         const webhookUrl = getWebhookUrl();
