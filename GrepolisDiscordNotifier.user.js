@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Grepolis Discord Attack Notifier
-// @version      1.5.2
+// @version      1.5.3
 // @author       AbstractGR
 // @description  Standalone script to send Discord alerts for incoming Grepolis attacks
 // @match        http://*.grepolis.com/game/*
@@ -418,7 +418,7 @@
                     : "0";
 
                 // 3. Researches
-                const researches = models?.Researches?.attributes || {};
+                const researches = models?.Researches[targetTownId]?.attributes || {};
                 const hasRam = researches.ram ?? false;
                 const hasPhalanx = researches.phalanx ?? false;
                 
